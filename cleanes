@@ -1,0 +1,66 @@
+#!/bin/bash
+
+help_text="An cleanes command clears up old snapshots from a ES repository and keeps only the number of snapshots from latest snapshot that are mentioned.\n\nUSAGE:\n    \t  cleanes [FLAGS] [OPTIONS] \n\nFLAGS:\n    \t-e    \t    Elastic Search Host whose snapshots are to be cleaned\n    \t-n     \t   Number of snapshots to keep\n    \t-r   \t     Repository name holding the snapshots\n   \t-h      \t  Help\n  \t-t  \t   Timeout seconds to reach the ES Host.Default is 30 seconds\n"
+#echo -e $help_text
+timeout=30
+
+while getopts 'he:n:r:t:' FLAGS;
+do
+    case "$FLAGS" in
+    e)
+        es_host="$OPTARG"
+        if [[ -z $es_host ]]
+        then
+            echo "ERROR! ES Host is required"
+            exit 1
+        fi
+        ;;
+    n)
+        count="$OPTARG"
+        if [[ -z $count ]]
+        then
+            echo "Number of snapshots to keep is required"
+            exit 1
+        fi
+        ;;
+    t)
+        timeout="$OPTARG"
+        ;;
+    r)
+        repository="$OPTARG"
+        if [[ -z $repository ]]
+        then
+            echo "Repository name is required"
+            exit 1
+        fi
+        ;;
+    h)
+        echo -e $help_text
+        exit
+        ;;
+    ?)
+        echo -e $help_text
+        exit 1
+        ;;
+    esac
+done
+
+curl $es_host/_snapshot/$repository/_all\?pretty -s --connect-timeout $timeout > es.out
+
+if [[ $? != 0 ]]
+then
+    echo "ERROR! Elasticsearch unreachable or the repository is not correct"
+fi
+es_snapshots=($(cat es.out | jq '.snapshots[].snapshot' | tr -s "\n" " "))
+
+for snap in ${!es_snapshots[@]}
+do
+    counts=$((snap+$count))
+    if [[ $counts -lt ${#es_snapshots[@]} ]]
+    then
+        snapshot_name=$(echo ${es_snapshots[$snap]} | tr -d '"')
+        curl -X DELETE $es_host/_snapshot/$repository/$snapshot_name
+    fi
+done
+
+rm es.out
